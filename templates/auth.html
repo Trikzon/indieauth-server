@@ -1,0 +1,35 @@
+<section>
+    <form method="POST" id="auth-form">
+        <h1>Authenticate to {{ client_id.replace("https://", "").replace("http://", "") }}</h1>
+        <p>
+            <a href="{{ client_id }}">{{ client_id.replace("https://", "").replace("http://", "") }}</a>
+            is requesting your permission to authorize yourself as {{ me }}.
+        </p>
+        <p>You will be redirected to {{ redirect_uri }} after authorization.</p>
+        <p>You can use any of the authentication methods below to sign in.</p>
+        <ul>
+            <li>
+                <input type="radio" name="method" id="method-github" value="/auth/github" checked>
+                <label for="method-github">GitHub</label>
+            </li>
+        </ul>
+        <input type="hidden" name="response_type" value="{{ response_type }}">
+        <input type="hidden" name="client_id" value="{{ client_id }}">
+        <input type="hidden" name="redirect_uri" value="{{ redirect_uri }}">
+        <input type="hidden" name="state" value="{{ state }}">
+        <input type="hidden" name="code_challenge" value="{{ code_challenge }}">
+        <input type="hidden" name="code_challenge_method" value="{{ code_challenge_method }}">
+        <input type="hidden" name="scope" value="{{ scope }}">
+        <input type="hidden" name="me" value="{{ me }}">
+        <input type="submit" value="Authorize">
+    </form>
+</section>
+
+<script>
+    const form = document.getElementById("auth-form");
+
+    form.addEventListener("submit", e => {
+        const selectedMethod = document.querySelector('input[name="method"]:checked').value;
+        form.action = selectedMethod;
+    });
+</script>
