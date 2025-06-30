@@ -268,8 +268,8 @@ def auth_github_callback():
     return redirect(
         f"{auth_request['redirect_uri']}"
         f"?code={auth_code}"
-        f"?state={auth_request['state']}"
-        f"?iss={ISSUER}"
+        f"&state={auth_request['state']}"
+        f"&iss={ISSUER}"
     )
 
 
