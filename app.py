@@ -14,7 +14,7 @@ TOKEN_ENDPOINT = "https://indieauth.tryban.dev/token"
 
 GITHUB_CLIENT_ID = os.environ.get("GITHUB_CLIENT_ID")
 GITHUB_CLIENT_SECRET = os.environ.get("GITHUB_CLIENT_SECRET")
-GITHUB_AUTH_CALLBACK = "http://127.0.0.1:5000/auth/github/callback"
+GITHUB_AUTH_CALLBACK = "https://indieauth.tryban.dev/auth/github/callback"
 
 with sqlite3.connect(DATABASE) as conn:
     cursor = conn.cursor()
@@ -27,7 +27,18 @@ with sqlite3.connect(DATABASE) as conn:
             code_challenge        TEXT      NOT NULL,
             code_challenge_method TEXT      NOT NULL,
             scope                 TEXT      NOT NULL,
-            expires_at TIMESTAMP  TIMESTAMP NOT NULL
+            expires_at            TIMESTAMP NOT NULL
+        );
+    ''')
+
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS access_tokens (
+            access_token          TEXT      PRIMARY KEY,
+            auth_code             TEXT      NOT NULL,
+            client_id             TEXT      NOT NULL,
+            redirect_uri          TEXT      NOT NULL,
+            scope                 TEXT      NOT NULL,
+            expires_at            TIMESTAMP NOT NULL
         );
     ''')
 
@@ -40,35 +51,35 @@ def oauth_authorization_server():
     return jsonify({
         "issuer": ISSUER,
         "authorization_endpoint": AUTHORIZATION_ENDPOINT,
-        # "token_endpoint": TOKEN_ENDPOINT,
+        "token_endpoint": TOKEN_ENDPOINT,
         "code_challenge_methods_supported": ["S256"],
     })
 
 
-def validate_auth_request(args: dict) -> dict:
+def validate_auth_request(args: dict) -> dict | str:
     if args is None:
-        return None
+        return "Supplied no arguments."
     
     me = args.get("me")
-    if me != "https://tryban.dev/":
-        return None
+    if me.replace("https://", "").replace("http://", "").rstrip("/") != "tryban.dev":
+        return "Not me."
 
     response_type = args.get("response_type")
     if response_type != "code":
-        return None
+        return "Invalid response type."
 
     client_id = args.get("client_id")
     redirect_uri = args.get("redirect_uri")
     state = args.get("state")
     if client_id is None or redirect_uri is None or state is None:
-        return None
+        return "Missing parameters."
     
     # TODO: Verify that client_id and redirect_uri are the same or allowed.
 
     code_challenge = args.get("code_challenge")
     code_challenge_method = args.get("code_challenge_method")
     if code_challenge is None or code_challenge_method != "S256":
-        return None
+        return "Invalid code challenge."
 
     scope = args.get("scope", "")
 
@@ -87,7 +98,7 @@ def validate_auth_request(args: dict) -> dict:
 def create_auth_code(auth_request: dict) -> str:
     auth_request = validate_auth_request(auth_request)
 
-    if auth_request is None:
+    if auth_request is str:
         return None
     
     auth_code = secrets.token_urlsafe(32)
@@ -145,8 +156,28 @@ def verify_auth_code(auth_code: str, client_id: str, redirect_uri: str, code_ver
         return True
 
 
-def create_access_token() -> str:
+def create_access_token(auth_code: str, client_id: str, redirect_uri: str, code_verifier: str) -> str:
+    if not verify_auth_code(auth_code, client_id, redirect_uri, code_verifier):
+        return None
+    
+    # TODO: Verify scope
+
     access_token = secrets.token_urlsafe(32)
+    
+    with sqlite3.connect(DATABASE) as conn:
+        cursor = conn.cursor()
+
+        cursor.execute(
+            "INSERT INTO access_tokens VALUES (?, ?, ?, ?, ?, datetime('now', '+1 hour'));",
+            (
+                access_token,
+                auth_code,
+                client_id,
+                redirect_uri,
+                ""
+            )
+        )
+    
     return access_token
 
 
@@ -154,8 +185,8 @@ def create_access_token() -> str:
 def auth():
     if request.method == "GET":
         auth_request = validate_auth_request(request.args)
-        if auth_request is None:
-            return "Invalid request."
+        if auth_request is str:
+            return f"Invalid request. {auth_request}"
 
         return render_template("auth.html", **auth_request)
     
@@ -179,8 +210,8 @@ def auth():
 @app.route("/auth/github", methods=["POST"])
 def auth_github():
     auth_request = validate_auth_request(request.form)
-    if auth_request is None:
-        return "Invalid request."
+    if auth_request is str:
+        return f"Invalid request. {auth_request}"
     
     session["auth_request"] = auth_request
 
@@ -204,8 +235,8 @@ def auth_github_callback():
         return "Invalid request."
     
     auth_request = validate_auth_request(session.pop("auth_request", None))
-    if auth_request is None:
-        return "Invalid request."
+    if auth_request is str:
+        return f"Invalid request. {auth_request}"
 
     resp = requests.post(
         f"https://github.com/login/oauth/access_token"
@@ -240,6 +271,29 @@ def auth_github_callback():
         f"?state={auth_request['state']}"
         f"?iss={ISSUER}"
     )
+
+
+@app.route("/token", methods=["POST"])
+def token():
+    grant_type = request.form.get("grant_type")
+    auth_code = request.form.get("code")
+    client_id = request.form.get("client_id")
+    redirect_uri = request.form.get("redirect_uri")
+    code_verifier = request.form.get("code_verifier")
+
+    if grant_type != "authorization_code":
+        return "Invalid request."
+    
+    access_token = create_access_token(auth_code, client_id, redirect_uri, code_verifier)
+    if access_token is None:
+        return "Invalid request."
+    
+    return jsonify({
+        "access_token": access_token,
+        "token_type": "Bearer",
+        "scope": "",
+        "me": "https://tryban.dev/"
+    })
 
 
 if __name__ == "__main__":

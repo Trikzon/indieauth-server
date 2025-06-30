@@ -1,12 +1,26 @@
 services:
   indieauth-server:
+    container_name: indieauth-server
     build: .
     ports:
       - "5000:5000"
-    volumes:
-      - .:/app
     environment:
       - FLASK_ENV=development
       - FLASK_SECRET_KEY=${FLASK_SECRET_KEY}
       - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID}
       - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET}
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.indieauth.rule=Host(`indieauth.tryban.dev`)"
+      - "traefik.http.routers.indieauth.entrypoints=https"
+      - "traefik.http.routers.indieauth.tls=true"
+      - "traefik.http.services.indieauth.loadbalancer.server.port=5000"
+    networks:
+      - proxy
+    volumes:
+      - .:/app
+
+networks:
+  proxy:
+    external: true
